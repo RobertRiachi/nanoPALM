@@ -24,7 +24,7 @@ class MultiQueryAttention(nn.Module):
 
     def __init__(self, config):
         super().__init__()
-        
+
         self.c_attn = nn.Linear(config.n_embed, (config.n_head + 2) * (config.n_embed // config.n_head), bias=False)
         self.out_proj = nn.Linear(config.n_embed, config.n_embed, bias=False)
         self.attn_dropout = nn.Dropout(config.dropout)
@@ -32,14 +32,30 @@ class MultiQueryAttention(nn.Module):
         self.n_embed = config.n_embed
         self.n_head = config.n_head
 
+        pos = 10000**((-2 * torch.arange(0,self.head_dim,2) - 1)/self.head_dim)
+        self.register_buffer("pos", pos)
+    
+    def rotate_embeddings(self, x):
+         x = x.view(*x.shape[:-1], 2, -1)
+         x1, x2 = x.unbind(dim=-2)
+         return torch.cat((-x2, x1), dim=1)
+
     def forward(self, x):
 
+        _, n_tokens, _ = x.shape
         head_embed = self.n_embed//self.n_head
 
+        # Multi-Query Attention
         q, k, v = self.c_attn(x).split([self.n_embed, head_embed, head_embed], dim=2)
         q = q.view((*x.shape[:2], self.n_head, -1)).permute(0,2,1,3)
         k = k.view(*x.shape[:2], 1, head_embed).permute(0,2,3,1)
         v = v.view(*x.shape[:2], 1, head_embed).permute(0,2,1,3)
+
+        # RoPE embeddings
+        token_seq = torch.arange(n_tokens).unsqueeze(1) @ self.pos.unsqueeze(0)
+        rotary_embds = torch.cat((token_seq, token_seq), dim=-1)
+        q = (q * rotary_embds.cos()) + (self.rotate_embeddings(q) * rotary_embds.sin())
+        k = (k * rotary_embds.cos()) + (self.rotate_embeddings(k) * rotary_embds.sin())
 
         attn_filter = (q @ k) * (head_embed)**-0.5
         attn_filter = F.softmax(attn_filter, dim=-1)
@@ -83,22 +99,20 @@ class PaLM(nn.Module):
         self.config = config
         self.device = config.device
 
-        self.word_embeds = nn.Embedding(config.vocab_size, config.n_embed)
-        #TODO: RoPE embeddings go here
-
-        self.dropout = nn.Dropout(config.dropout)
-        self.blocks = nn.ModuleList([ParallelLayerBlock(config) for _ in range(config.n_layer)])
-        self.out_ln = LayerNorm(config.n_embed)
+        self.decoder = nn.ModuleDict(dict(
+            word_embds = nn.Embedding(config.vocab_size, config.n_embed),
+            drop = nn.Dropout(config.dropout),
+            blocks = nn.ModuleList([ParallelLayerBlock(config) for _ in range(config.n_layer)]),
+            out_ln = LayerNorm(config.n_embed)
+        ))
 
     def forward(self, x):
 
         # TODO: set embedding weight to proj out according to paper
 
-        batch_size, n_tokens = x.size()
-
-        pos = torch.arange(0, n_tokens, dtype=torch.long, device=self.device).unsqueeze(0)
-
         token_embds = self.word_embeds(x)
-        # TODO: pos_embds go here
-        pos_embds = pos
+        x = self.decoder.drop(token_embds)
+        for block in self.decoder.blocks:
+            x = block(x)
+        x = self.decoder.out_ln(x)
 
