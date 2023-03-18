@@ -42,9 +42,9 @@ class MultiQueryAttention(nn.Module):
         self.register_buffer("pos", pos)
 
     def rotate_embeddings(self, x):
-        x = x.view(*x.shape[:-1], 2, -1)
-        x1, x2 = x.unbind(dim=-2)
-        return torch.cat((-x2, x1), dim=-1)
+        x = x.view(*x.shape[:-1], -1, 2).flip(-1)
+        x[...,0] *= -1
+        return x.flatten(start_dim=-2)
 
     def forward(self, x):
 
@@ -129,10 +129,13 @@ class PaLM(nn.Module):
             config.n_embed, config.vocab_size, bias=False)
         self.ln_vocab.weight = self.decoder.word_embds.weight
 
+        nn.init.normal_(self.decoder.word_embds.weight, std=0.02)
+
     def forward(self, x):
 
-        token_embds = self.decoder.word_embds(x)
-        x = self.decoder.drop(token_embds)
+        x = self.decoder.word_embds(x)
+        x = self.decoder.drop(x)
+
         for block in self.decoder.blocks:
             x = block(x)
         x = self.decoder.out_ln(x)
