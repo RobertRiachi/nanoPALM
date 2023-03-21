@@ -138,11 +138,3 @@ if __name__ == "__main__":
         update_optim(optim, step)
         optim.step()
         optim.zero_grad()
-
-
-
-        
-        # clip the gradient
-        # if grad_clip != 0.0:
-        #     scaler.unscale_(optimizer)
-        #     torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
