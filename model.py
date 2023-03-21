@@ -1,3 +1,4 @@
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -36,10 +37,7 @@ class MultiQueryAttention(nn.Module):
         self.resid_dropout = nn.Dropout(config.dropout)
         self.n_embed = config.n_embed
         self.n_head = config.n_head
-
-        head_dim = self.n_embed // self.n_head
-        pos = 10000**((-2 * torch.arange(0, head_dim, 2) - 1)/head_dim)
-        self.register_buffer("pos", pos)
+        self.head_dim = self.n_embed // self.n_head
 
     def rotate_embeddings(self, x):
         x = x.view(*x.shape[:-1], -1, 2).flip(-1)
@@ -59,9 +57,10 @@ class MultiQueryAttention(nn.Module):
         v = v.view(*x.shape[:2], 1, head_embed).permute(0, 2, 1, 3)
 
         # RoPE embeddings
-        token_seq = torch.arange(n_tokens, dtype=self.pos.dtype).unsqueeze(
-            1) @ self.pos.unsqueeze(0)
+        pos = 10000**((-2 * torch.arange(0, self.head_dim, 2, device=x.device) - 1)/self.head_dim)
+        token_seq = torch.arange(n_tokens, dtype=pos.dtype, device=x.device).unsqueeze(1) @ pos.unsqueeze(0)
         rotary_embds = torch.cat((token_seq, token_seq), dim=-1)
+
         q = (q * rotary_embds.cos()) + \
             (self.rotate_embeddings(q) * rotary_embds.sin())
         k = (k * rotary_embds.cos()) + \
@@ -114,7 +113,6 @@ class PaLM(nn.Module):
         super().__init__()
 
         self.config = config
-        self.device = config.device
 
         self.decoder = nn.ModuleDict(dict(
             word_embds=nn.Embedding(config.vocab_size, config.n_embed),
@@ -129,7 +127,15 @@ class PaLM(nn.Module):
             config.n_embed, config.vocab_size, bias=False)
         self.ln_vocab.weight = self.decoder.word_embds.weight
 
-        nn.init.normal_(self.decoder.word_embds.weight, std=0.02)
+        self.apply(self._init_weights)
+
+    def _init_weights(self, module):
+        # Paper inits all weights aside from embedding and layer_norm using W ~ N(0, 1/sqrt(n_in))
+        # Input embeddings get initalized to E ~ N(0,1) since layer_norm isn't applied to the embedding
+        if isinstance(module, nn.Linear):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=1/math.sqrt(module.in_features))
+        elif isinstance(module, nn.Embedding):
+            nn.init.normal_(self.decoder.word_embds.weight)
 
     def forward(self, x):
 
@@ -150,27 +156,4 @@ class PaLMConfig:
     dropout: float
     vocab_size: int
     n_layer: int
-    device: str
-
-
-if __name__ == "__main__":
-
-    torch.manual_seed(1337)
-
-    from transformers import AutoTokenizer
-
-    tokenizer = AutoTokenizer.from_pretrained('gpt2')
-    input = "This is a test"
-    txt_tokens = tokenizer.encode(input)
-
-    config = PaLMConfig(n_embed=768,
-                        n_head=4,
-                        dropout=0.1,
-                        vocab_size=tokenizer.vocab_size,
-                        n_layer=2,
-                        device="cuda" if torch.cuda.is_available() else "cpu")
-
-    palm = PaLM(config)
-    out = palm(torch.tensor(txt_tokens).unsqueeze(0))
-
-    print(out.shape)
+    
