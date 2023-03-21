@@ -14,7 +14,7 @@ from tqdm import tqdm
 device = "cuda" if torch.cuda.is_available() else "cpu"  # No love for MPS for now
 
 # Evaluation
-eval_freq = 5
+eval_freq = 50
 num_evals = 10
 
 # Data
@@ -26,7 +26,7 @@ block_size = 512  # Paper uses 2048 but this might be a bit too extreme for cons
 
 # Training
 start_iter = 0  # TODO: Update this when loading from checkpoint in the future
-max_iters = 10
+max_iters = 100
 learning_rate = 3e-4
 beta1 = 0.9
 beta2 = 1.0 - 1**(-0.8) # Dynamically modified during training
@@ -34,7 +34,7 @@ weight_decay = learning_rate**2.0 # Dynamically modified during training
 grad_clip = 1.0
 
 # WandB
-wandb_logging_enabled = True
+wandb_logging_enabled = False
 wandb_project_name = "nanoPaLM"
 wandb_run_name = "palm"
 
@@ -61,7 +61,7 @@ def update_optim(optim, step):
     for group in optim.param_groups:
         lr = get_lr(step)
         group['lr'] = lr
-        group['betas'] = (beta1, 1.0 - (step)**(-0.8))
+        group['betas'] = (beta1, 1.0 - (max(1,step))**(-0.8)) # max is kinda hacky but avoids div by 0 
 
         # If not in no_decay group update decay
         if group['weight_decay'] != 0.0:
@@ -83,7 +83,6 @@ def load_batch(split, batch_size, device):
     y = torch.stack(
         [torch.from_numpy((split[i+1:i+1+block_size]).astype(np.int64)) for i in ix])
     if device == 'cuda':
-        # pin arrays x,y, which allows us to move them to GPU asynchronously (non_blocking=True)
         x, y = x.pin_memory().to(device, non_blocking=True), y.pin_memory().to(
             device, non_blocking=True)
     else:
@@ -120,8 +119,8 @@ if __name__ == "__main__":
     tokenizer = AutoTokenizer.from_pretrained('gpt2')
 
     # Load model
-    config = PaLMConfig(n_embed=512,
-                        n_head=4,
+    config = PaLMConfig(n_embed=768,
+                        n_head=12,
                         dropout=0.1,
                         vocab_size=tokenizer.vocab_size,
                         n_layer=2)
