@@ -12,10 +12,12 @@ from tqdm import tqdm
 
 # TODO: clean this up
 device = "cuda" if torch.cuda.is_available() else "cpu"  # No love for MPS for now
+run_name = "palm"
 
 # Evaluation
-eval_freq = 50
-num_evals = 10
+eval_freq = 1000
+num_evals = 100
+best_val_loss = 1e9
 
 # Data
 datasets_dir = 'data'
@@ -26,7 +28,7 @@ block_size = 512  # Paper uses 2048 but this might be a bit too extreme for cons
 
 # Training
 start_iter = 0  # TODO: Update this when loading from checkpoint in the future
-max_iters = 100
+max_iters = 100000
 learning_rate = 3e-4
 beta1 = 0.9
 beta2 = 1.0 - 1**(-0.8) # Dynamically modified during training
@@ -36,7 +38,9 @@ grad_clip = 1.0
 # WandB
 wandb_logging_enabled = False
 wandb_project_name = "nanoPaLM"
-wandb_run_name = "palm"
+
+# Config
+config = {k:v for k,v in globals().items() if not k.startswith('_') and isinstance(v, (int, float, bool, str))}
 
 def get_lr(step):
     # 10**-2 for the first 10k steps
@@ -119,20 +123,20 @@ if __name__ == "__main__":
     tokenizer = AutoTokenizer.from_pretrained('gpt2')
 
     # Load model
-    config = PaLMConfig(n_embed=768,
-                        n_head=12,
-                        dropout=0.1,
-                        vocab_size=tokenizer.vocab_size,
-                        n_layer=2)
+    palm_config = PaLMConfig(n_embed=768,
+                             n_head=6,
+                             dropout=0.1,
+                             vocab_size=tokenizer.vocab_size,
+                             n_layer=4)
 
-    model = PaLM(config).to(device)
+    model = PaLM(palm_config).to(device)
     num_params = num_model_params(model)
     print(f"Initializing PaLM model with {num_params} params")
 
     # Initalize logging
     if wandb_logging_enabled:
         import wandb
-        wandb.init(project=wandb_project_name, name=wandb_run_name, config=config)
+        wandb.init(project=wandb_project_name, name=run_name, config=palm_config)
 
     # Disable weight decay for unwanted modules
     # PaLM model has no bias so only include weight params
@@ -177,7 +181,20 @@ if __name__ == "__main__":
                     "lr": get_lr(step)
                 })
 
-            # TODO: Save checkpoint
+            if losses['val'] < best_val_loss:
+                best_val_loss = losses['val']
+                checkpoint = {
+                    'model': model.state_dict(),
+                    'optimizer': optim.state_dict(),
+                    'model_args': palm_config,
+                    'step': step,
+                    'best_val_loss': best_val_loss,
+                    'config': config,
+                }
+                print(f"Saving checkpoint, step:{step}, val_loss:{best_val_loss}")
+                check_out = f"checkpoints/{run_name}"
+                os.mkdir(check_out)
+                torch.save(checkpoint, os.path.join(check_out, "ckpt.pt"))
 
         for micro_step in range(grad_accumulation_steps):
             x, y = load_batch(train_data, batch_size, device=device)
