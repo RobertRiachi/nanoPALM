@@ -36,7 +36,7 @@ weight_decay = learning_rate**2.0 # Dynamically modified during training
 grad_clip = 1.0
 
 # WandB
-wandb_logging_enabled = False
+wandb_logging_enabled = True
 wandb_project_name = "nanoPaLM"
 
 # Config
@@ -193,7 +193,9 @@ if __name__ == "__main__":
                 }
                 print(f"Saving checkpoint, step:{step}, val_loss:{best_val_loss}")
                 check_out = f"checkpoints/{run_name}"
-                os.mkdir(check_out)
+
+                if not os.path.exists(check_out):
+                    os.mkdir(check_out)
                 torch.save(checkpoint, os.path.join(check_out, "ckpt.pt"))
 
         for micro_step in range(grad_accumulation_steps):
