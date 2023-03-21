@@ -137,16 +137,26 @@ class PaLM(nn.Module):
         elif isinstance(module, nn.Embedding):
             nn.init.normal_(self.decoder.word_embds.weight)
 
-    def forward(self, x):
+    def forward(self, x, targets=None):
 
         x = self.decoder.word_embds(x)
         x = self.decoder.drop(x)
 
         for block in self.decoder.blocks:
             x = block(x)
+
         x = self.decoder.out_ln(x)
 
-        return self.ln_vocab(x)
+        logits = self.ln_vocab(x)
+
+        if targets is not None:
+            # Paper scales pre-softmax output logits by 1/sqrt(n_embed)
+            loss = F.cross_entropy(torch.mul(logits, self.config.n_embed**-0.5).view(-1, logits.size(-1)),
+                    targets.view(-1),
+                    ignore_index=-1)
+
+            return logits, loss
+        return logits, None
 
 
 @dataclass
@@ -156,4 +166,3 @@ class PaLMConfig:
     dropout: float
     vocab_size: int
     n_layer: int
-    
