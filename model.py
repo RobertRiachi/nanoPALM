@@ -35,6 +35,7 @@ class MultiQueryAttention(nn.Module):
         self.out_proj = nn.Linear(config.n_embed, config.n_embed, bias=False)
         self.attn_dropout = nn.Dropout(config.dropout)
         self.resid_dropout = nn.Dropout(config.dropout)
+        self.dropout = config.dropout
         self.n_embed = config.n_embed
         self.n_head = config.n_head
         self.head_dim = self.n_embed // self.n_head
@@ -65,13 +66,10 @@ class MultiQueryAttention(nn.Module):
             (self.rotate_embeddings(q) * rotary_embds.sin())
         k = (k * rotary_embds.cos()) + \
             (self.rotate_embeddings(k) * rotary_embds.sin())
-
-        attn_filter = (q @ k.transpose(-2, -1)) * (head_embed)**-0.5
-        attn_filter = F.softmax(attn_filter, dim=-1)
-
-        attn = self.attn_dropout(attn_filter) @ v
+        
+        attn = F.scaled_dot_product_attention(q,k,v, dropout_p=self.dropout, is_causal=True)
+        
         attn = attn.permute(0, 2, 1, 3).flatten(start_dim=2)
-
         return self.resid_dropout(self.out_proj(attn))
 
 
@@ -151,7 +149,8 @@ class PaLM(nn.Module):
 
         if targets is not None:
             # Paper scales pre-softmax output logits by 1/sqrt(n_embed)
-            loss = F.cross_entropy(torch.mul(logits, self.config.n_embed**-0.5).view(-1, logits.size(-1)),
+            scaled_logits = torch.mul(logits, self.config.n_embed**-0.5)
+            loss = F.cross_entropy(scaled_logits.view(-1, logits.size(-1)),
                     targets.view(-1),
                     ignore_index=-1)
 

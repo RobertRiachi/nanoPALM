@@ -5,7 +5,7 @@ import torch.nn.functional as F
 import numpy as np
 from math import floor, log
 from torch.optim import AdamW
-from torch.optim.lr_scheduler import LambdaLR
+from contextlib import nullcontext
 from model import PaLMConfig, PaLM, LayerNorm
 from transformers import AutoTokenizer
 from tqdm import tqdm
@@ -29,11 +29,17 @@ block_size = 512  # Paper uses 2048 but this might be a bit too extreme for cons
 # Training
 start_iter = 0  # TODO: Update this when loading from checkpoint in the future
 max_iters = 100000
-learning_rate = 3e-4
+learning_rate = 1e-2 #3e-4
 beta1 = 0.9
 beta2 = 1.0 - 1**(-0.8) # Dynamically modified during training
 weight_decay = learning_rate**2.0 # Dynamically modified during training
 grad_clip = 1.0
+
+# Precision
+precision = torch.bfloat16
+amp_enabled = True # Only works with bfloat16 on my gpu, else loss becomes nan not sure why
+amp_ctx = nullcontext() if device == 'cpu' else torch.amp.autocast(enabled=amp_enabled, device_type=device, dtype=precision)
+scaler = torch.cuda.amp.GradScaler(enabled=amp_enabled)
 
 # WandB
 wandb_logging_enabled = True
@@ -103,7 +109,8 @@ def evaluate_splits(model, splits, split_names, num_evals, batch_size, device):
         for i in range(num_evals):
             x, y = load_batch(split, batch_size, device)
 
-            _, loss = model(x, y)
+            with amp_ctx:
+                _, loss = model(x, y)
 
             losses[i] = loss.item()
 
@@ -116,10 +123,8 @@ if __name__ == "__main__":
 
     # Load data & tokenizer
     data_dir = os.path.join(datasets_dir, dataset)
-    train_data = np.memmap(os.path.join(
-        data_dir, 'train.bin'), dtype=np.uint16, mode='r')
-    val_data = np.memmap(os.path.join(data_dir, 'val.bin'),
-                         dtype=np.uint16, mode='r')
+    train_data = np.memmap(os.path.join(data_dir, 'train.bin'), dtype=np.uint16, mode='r')
+    val_data = np.memmap(os.path.join(data_dir, 'val.bin'), dtype=np.uint16, mode='r')
     tokenizer = AutoTokenizer.from_pretrained('gpt2')
 
     # Load model
@@ -157,14 +162,17 @@ if __name__ == "__main__":
     optim = AdamW(optimizer_grouped_parameters,
                   lr=learning_rate,
                   betas=(beta1, beta2),
-                  fused=True if device == 'cuda' else False)
+                  fused=True if device == 'cuda' else False,
+                  eps=1e-6)
+
+    model = torch.compile(model)
 
     # Training loop
     for step in tqdm(range(start_iter, max_iters + 1)):
 
         # batch_size = get_bs(step) TODO: won't fit on smaller GPUs, figure out work around
 
-        if step % eval_freq == 0:
+        if step % eval_freq == 0 and step != 0:
             losses = evaluate_splits(model,
                                      splits=[train_data, val_data],
                                      split_names=['train', 'val'],
@@ -200,17 +208,24 @@ if __name__ == "__main__":
 
         for micro_step in range(grad_accumulation_steps):
             x, y = load_batch(train_data, batch_size, device=device)
-            _, loss = model(x, y)
-            loss.backward()
+            
+            with amp_ctx:
+                _, loss = model(x, y)
+            
+            scaler.scale(loss).backward()
 
         # Normalize params by RSM to compensate for lr normalization per param tensor
         for param in model.parameters():
             param.data /= torch.sqrt(torch.mean(torch.square(param.data)))
 
         # Grad clipping for all models
+        scaler.unscale_(optim)
         torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
 
         # Backward step
         update_optim(optim, step)
-        optim.step()
+
+        scaler.step(optim)
+        scaler.update()
+
         optim.zero_grad()
