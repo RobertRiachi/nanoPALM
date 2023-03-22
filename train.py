@@ -1,9 +1,9 @@
 import os
+import math
 import wandb
 import torch
 import torch.nn.functional as F
 import numpy as np
-from math import floor, log
 from torch.optim import AdamW
 from contextlib import nullcontext
 from model import PaLMConfig, PaLM, LayerNorm
@@ -15,8 +15,8 @@ device = "cuda" if torch.cuda.is_available() else "cpu"  # No love for MPS for n
 run_name = "palm"
 
 # Evaluation
-eval_freq = 1000
-num_evals = 100
+eval_freq = 100#1000
+num_evals = 20#100
 best_val_loss = 1e9
 
 # Data
@@ -29,41 +29,36 @@ block_size = 512  # Paper uses 2048 but this might be a bit too extreme for cons
 # Training
 start_iter = 0  # TODO: Update this when loading from checkpoint in the future
 max_iters = 100000
-learning_rate = 1e-2 #3e-4
-beta1 = 0.9
-beta2 = 1.0 - 1**(-0.8) # Dynamically modified during training
+warmup_iters = 2000
+learning_rate = 3e-4
+lr_decay_iters = max_iters # Chinchilla
+min_learning_rate = learning_rate / 10 # Chinchilla
+#beta1 = 0.9
+#beta2 = 1.0 - 1**(-0.8) # Dynamically modified during training
 weight_decay = learning_rate**2.0 # Dynamically modified during training
-grad_clip = 1.0
+grad_clip = 0.5 # 1.0
 
 # Precision
 precision = torch.bfloat16
-amp_enabled = True # Only works with bfloat16 on my gpu, else loss becomes nan not sure why
+amp_enabled = (precision == torch.bfloat16) # Only works with bfloat16 on my gpu, else loss becomes nan not sure why
 amp_ctx = nullcontext() if device == 'cpu' else torch.amp.autocast(enabled=amp_enabled, device_type=device, dtype=precision)
 scaler = torch.cuda.amp.GradScaler(enabled=amp_enabled)
 
 # WandB
-wandb_logging_enabled = True
+wandb_logging_enabled = False
 wandb_project_name = "nanoPaLM"
 
 # Config
 config = {k:v for k,v in globals().items() if not k.startswith('_') and isinstance(v, (int, float, bool, str))}
 
 def get_lr(step):
-    # 10**-2 for the first 10k steps
-    if step < 10000:
-        return 10**-2
-    # After 10k steps decay by 1/root(steps)
-    return step**-0.5
-
-
-def get_bs(step):
-    # PaLM paper claims 512 bs until 50k steps, 1024 bs until 115k steps, and 2048 bs until complete at 225k
-    if step < 50000:
-        return 512
-    elif step < 115000:
-        return 1024
-    else:
-        return 2024
+    # Warmup, else cosine decay learning rate
+    if step < warmup_iters:
+        return learning_rate * step / warmup_iters
+    
+    decay = (step - warmup_iters) / (lr_decay_iters - warmup_iters)
+    coeff = 0.5 * (1.0 + math.cos(math.pi * decay))
+    return min_learning_rate + coeff * (learning_rate - min_learning_rate)
 
 
 def update_optim(optim, step):
@@ -71,7 +66,6 @@ def update_optim(optim, step):
     for group in optim.param_groups:
         lr = get_lr(step)
         group['lr'] = lr
-        group['betas'] = (beta1, 1.0 - (max(1,step))**(-0.8)) # max is kinda hacky but avoids div by 0 
 
         # If not in no_decay group update decay
         if group['weight_decay'] != 0.0:
@@ -82,7 +76,7 @@ def num_model_params(model):
     units = ['', 'K', 'M', 'B', 'T']
     total_params = sum(p.numel()
                        for p in model.parameters() if p.requires_grad)
-    mag = int(floor(log(total_params, 1000)))
+    mag = int(math.floor(math.log(total_params, 1000)))
     return f"{int(total_params / 1000**mag)}{units[mag]}"
 
 
@@ -160,17 +154,15 @@ if __name__ == "__main__":
     ]
 
     optim = AdamW(optimizer_grouped_parameters,
-                  lr=learning_rate,
-                  betas=(beta1, beta2),
-                  fused=True if device == 'cuda' else False,
-                  eps=1e-6)
+                lr=learning_rate,
+                fused=True if device == 'cuda' else False)
 
     model = torch.compile(model)
 
     # Training loop
     for step in tqdm(range(start_iter, max_iters + 1)):
 
-        # batch_size = get_bs(step) TODO: won't fit on smaller GPUs, figure out work around
+        update_optim(optim, step)
 
         if step % eval_freq == 0 and step != 0:
             losses = evaluate_splits(model,
@@ -210,20 +202,13 @@ if __name__ == "__main__":
             x, y = load_batch(train_data, batch_size, device=device)
             
             with amp_ctx:
-                _, loss = model(x, y)
+                logits, loss = model(x, y)
             
             scaler.scale(loss).backward()
-
-        # Normalize params by RSM to compensate for lr normalization per param tensor
-        for param in model.parameters():
-            param.data /= torch.sqrt(torch.mean(torch.square(param.data)))
 
         # Grad clipping for all models
         scaler.unscale_(optim)
         torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
-
-        # Backward step
-        update_optim(optim, step)
 
         scaler.step(optim)
         scaler.update()

@@ -133,7 +133,7 @@ class PaLM(nn.Module):
         if isinstance(module, nn.Linear):
             torch.nn.init.normal_(module.weight, mean=0.0, std=1/math.sqrt(module.in_features))
         elif isinstance(module, nn.Embedding):
-            nn.init.normal_(self.decoder.word_embds.weight)
+            nn.init.normal_(self.decoder.word_embds.weight) # maybe make std=0.02 here
 
     def forward(self, x, targets=None):
 
@@ -148,9 +148,8 @@ class PaLM(nn.Module):
         logits = self.ln_vocab(x)
 
         if targets is not None:
-            # Paper scales pre-softmax output logits by 1/sqrt(n_embed)
-            scaled_logits = torch.mul(logits, self.config.n_embed**-0.5)
-            loss = F.cross_entropy(scaled_logits.view(-1, logits.size(-1)),
+            # Paper scales pre-softmax output logits by 1/sqrt(n_embed), but I can't get this to work well
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)),
                     targets.view(-1),
                     ignore_index=-1)
 
