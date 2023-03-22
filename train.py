@@ -95,8 +95,8 @@ def load_batch(split, batch_size, device):
         # Copy the incoming data directly from pinned memory into cuda mem
         xy_cuda.copy_(xy, non_blocking=True)
         # Slice out x and y
-        x = xy_cuda[:-1]
-        y = xy_cuda[1:]
+        x = xy_cuda[:, :-1]
+        y = xy_cuda[:, 1:]
     else:
         raise NotImplementedError
         #x, y = x.to(device), y.to(device)
@@ -171,7 +171,7 @@ if __name__ == "__main__":
     # Training loop
     for step in tqdm(range(start_iter, max_iters + 1)):
 
-        update_optim(optim, step)
+        #update_optim(optim, step)
 
         if step % eval_freq == 0 and step != 0:
             losses = evaluate_splits(model,
@@ -209,7 +209,7 @@ if __name__ == "__main__":
 
         for micro_step in range(grad_accumulation_steps):
             x, y = load_batch(train_data, batch_size, device=device)
-            
+
             with amp_ctx:
                 logits, loss = model(x, y)
             
