@@ -80,17 +80,26 @@ def num_model_params(model):
     return f"{int(total_params / 1000**mag)}{units[mag]}"
 
 
+# Buffers for incoming data
+xy = torch.empty((batch_size, block_size+1), dtype=torch.int32).pin_memory()
+xy_cuda = torch.empty((batch_size, block_size+1), dtype=torch.int64, device="cuda")
+
 def load_batch(split, batch_size, device):
+    global xy
+    # Select which items to load
     ix = torch.randint(len(split) - block_size, (batch_size,))
-    x = torch.stack(
-        [torch.from_numpy((split[i:i+block_size]).astype(np.int64)) for i in ix])
-    y = torch.stack(
-        [torch.from_numpy((split[i+1:i+1+block_size]).astype(np.int64)) for i in ix])
+    # Set the relevant elements of xy
+    for i, data_i in enumerate(ix):
+        xy[i].numpy()[...] = split[data_i:data_i+1+block_size]
     if device == 'cuda':
-        x, y = x.pin_memory().to(device, non_blocking=True), y.pin_memory().to(
-            device, non_blocking=True)
+        # Copy the incoming data directly from pinned memory into cuda mem
+        xy_cuda.copy_(xy, non_blocking=True)
+        # Slice out x and y
+        x = xy_cuda[:-1]
+        y = xy_cuda[1:]
     else:
-        x, y = x.to(device), y.to(device)
+        raise NotImplementedError
+        #x, y = x.to(device), y.to(device)
     return x, y
 
 
