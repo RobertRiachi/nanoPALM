@@ -27,16 +27,16 @@ batch_size = 16  # Paper follows get_bs function defined below, but this might b
 block_size = 512  # Paper uses 2048 but this might be a bit too extreme for consumer GPUs
 
 # Training
+# Note: Paper uses lr=1e-2 for 10k iters, then drops to 1/sqrt(step)
+# I've found 2e-4 and cosine decay following Chinchilla guidelines to work better
 start_iter = 0  # TODO: Update this when loading from checkpoint in the future
 max_iters = 100000
 warmup_iters = 2000
-learning_rate = 3e-4
+learning_rate = 2e-4 # Modified at runtime to follow cosine decay
 lr_decay_iters = max_iters # Chinchilla
 min_learning_rate = learning_rate / 10 # Chinchilla
-#beta1 = 0.9
-#beta2 = 1.0 - 1**(-0.8) # Dynamically modified during training
-weight_decay = learning_rate**2.0 # Dynamically modified during training
-grad_clip = 0.5 # 1.0
+weight_decay = learning_rate**2.0 # Decoupled weight decay & modified at runtime
+grad_clip = 0.5
 
 # Precision
 precision = torch.bfloat16
@@ -162,6 +162,7 @@ if __name__ == "__main__":
         {'params': [param_dict[p] for p in no_decay_params if p != 'ln_vocab.weight'], 'weight_decay': 0.0}
     ]
 
+    # Model uses betas=(0.9, (1-step**-0.8)), but I've found default works better w/ AdamW
     optim = AdamW(optimizer_grouped_parameters,
                 lr=learning_rate,
                 fused=True if device == 'cuda' else False)
@@ -171,7 +172,7 @@ if __name__ == "__main__":
     # Training loop
     for step in tqdm(range(start_iter, max_iters + 1)):
 
-        #update_optim(optim, step)
+        update_optim(optim, step)
 
         if step % eval_freq == 0 and step != 0:
             losses = evaluate_splits(model,
@@ -215,7 +216,7 @@ if __name__ == "__main__":
             
             scaler.scale(loss).backward()
 
-        # Grad clipping for all models
+        # Grad clipping for all model sizes
         scaler.unscale_(optim)
         torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
 

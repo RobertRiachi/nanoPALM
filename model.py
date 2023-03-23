@@ -150,7 +150,7 @@ class PaLM(nn.Module):
         if targets is not None:
             # Paper scales pre-softmax output logits by 1/sqrt(n_embed), but I can't get this to work well
             loss = F.cross_entropy(logits.view(-1, logits.size(-1)),
-                    targets.view(-1),
+                    targets.contiguous().view(-1),
                     ignore_index=-1)
 
             return logits, loss
