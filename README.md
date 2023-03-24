@@ -38,6 +38,18 @@ python train.py
 
 # Results
 
-Sample of training for ~1 day on a single consumer GPU
+## Sample 1
+
+Prompt: `The meaning of life is`
+
+Response: `The meaning of life is not lost in the development process or by establishing and maintaining an ideal of shared purpose, where work and practices may not be done in accordance with the principles of imbalances.`
+
+## Sample 2
+
+Prompt: `Once upon a time there was`
+
+Response: `Once upon a time there was no form of protest. For the last few years there were almost a thousand people who were confronted by police. Earlier this year we had seen an increase in people arrested in the U.S. One in every 20 arrests were made in the U.S.`
+
+## Training performance for ~1 day on a single consumer GPU
 
 <img src="./assets/val_loss.png">

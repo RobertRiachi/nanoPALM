@@ -135,6 +135,25 @@ class PaLM(nn.Module):
         elif isinstance(module, nn.Embedding):
             nn.init.normal_(self.decoder.word_embds.weight) # maybe make std=0.02 here
 
+    @torch.no_grad()
+    def generate(self, input_tokens, max_length, terminal_ids=None, temp=1.0):
+        
+        while len(input_tokens) < max_length:
+            
+            logits, _ = self(input_tokens)
+            logits = logits[:, -1, :] / temp
+
+            token_scores = F.softmax(logits, dim=-1)
+            next_token = torch.multinomial(token_scores, num_samples=1)
+            
+            input_tokens = torch.cat((input_tokens, next_token), dim=1)
+
+            if terminal_ids and next_token in terminal_ids:
+                break
+
+        return input_tokens
+
+
     def forward(self, x, targets=None):
 
         x = self.decoder.word_embds(x)
