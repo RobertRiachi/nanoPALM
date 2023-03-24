@@ -1,6 +1,6 @@
 # nanoPALM
 
-<img src="https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEgLXCWMlipdu0gFF6hsiJHbxg1zSaEkdDWfl-8RakQuW__8RPvlOS9KGIScNCytxT4jz9isnx0GLMwbS1G0Q4WdXzT42GszgfwIIAVX1H3J-43lVWWqcb--q9cPsxCsJFFz2dRfpKgEmLe-xfIyBqQuPq1BPYcK9CtAK1_xnhgvgAAx0GeZmODJxGNMYQ/s16000/image8.gif"  width=920, height=300>
+<img src="./assets/palm.gif"  width=920, height=300>
 
 Inspired by nanoGPT, the simplest, fastest repository for training/finetuning small to medium-sized PALM models. 
 
