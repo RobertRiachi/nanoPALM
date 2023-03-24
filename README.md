@@ -1,10 +1,12 @@
 # nanoPALM
 
+<img src="https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEgLXCWMlipdu0gFF6hsiJHbxg1zSaEkdDWfl-8RakQuW__8RPvlOS9KGIScNCytxT4jz9isnx0GLMwbS1G0Q4WdXzT42GszgfwIIAVX1H3J-43lVWWqcb--q9cPsxCsJFFz2dRfpKgEmLe-xfIyBqQuPq1BPYcK9CtAK1_xnhgvgAAx0GeZmODJxGNMYQ/s16000/image8.gif"  width=920, height=300>
+
 Inspired by nanoGPT, the simplest, fastest repository for training/finetuning small to medium-sized PALM models. 
 
-This code tries to faithfully reproduce and create a functioning PaLM. Paper: https://arxiv.org/pdf/2204.02311.pdf
+This code tries to faithfully reproduce and create a functioning PaLM (Paper: https://arxiv.org/pdf/2204.02311.pdf) as efficiently as possible. 
 
-Trained on OpenWebText, running on a single consumer GPU for about 27 hours, stopping after 100k iterations.
+Trained on OpenWebText, using ~213M params and running on a single Nvidia 3090 GPU for 100,000 iterations (~26 hours) yeilds a val loss of 3.465. I was able to achieve roughly 1.15s/iter on my single machine, running a batch size of 16 with 4 grad accumulations per optimizer step. I've also included the nsys report for those interested in looking at the profile of a couple iterations of the model!
 
 # Getting started
 
@@ -52,4 +54,4 @@ Response: `Once upon a time there was no form of protest. For the last few years
 
 ## Training performance for ~1 day on a single consumer GPU
 
-<img src="./assets/val_loss.png">
+<img src="./assets/palm_loss.png" width=675 height=600>
