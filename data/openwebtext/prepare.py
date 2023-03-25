@@ -8,8 +8,8 @@
 import os
 from tqdm import tqdm
 import numpy as np
-import tiktoken
 import multiprocessing as mp
+from transformers import AutoTokenizer
 from datasets import load_dataset
 
 NUM_PROC = mp.cpu_count() // 2
@@ -22,11 +22,10 @@ dataset = load_dataset("openwebtext")
 split_dataset = dataset["train"].train_test_split(test_size=0.0005, seed=2357, shuffle=True)
 split_dataset['val'] = split_dataset.pop('test') # rename the test split to val
 
-enc = tiktoken.get_encoding(ENCODING_METHOD)
-
+tokenizer = AutoTokenizer.from_pretrained(ENCODING_METHOD)
 def process(example):
     # ignore special tokens and append EOT
-    ids = enc.encode_ordinary(example['text']) + [enc.eot_token] 
+    ids = tokenizer.encode(example['text']) + [tokenizer.eos_token_id] 
     return {'ids': ids, 'len': len(ids)}
 
 # tokenize the dataset
