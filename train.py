@@ -134,7 +134,7 @@ if __name__ == "__main__":
     palm_config = PaLMConfig(n_embed=768,
                              n_head=6,
                              dropout=0.1,
-                             vocab_size=tokenizer.vocab_size,
+                             vocab_size=50304, # GPT-2 vocab_size of 50257, padded up to nearest multiple of 64 for efficiency
                              n_layer=4)
 
     model = PaLM(palm_config).to(device)
